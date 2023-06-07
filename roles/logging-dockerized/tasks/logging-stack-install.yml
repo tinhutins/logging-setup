@@ -1,0 +1,198 @@
+---
+- name: Register debian destribution
+  shell: lsb_release -cs
+  register: lsb_release
+  when: ansible_os_family == "Debian"
+
+- name: Register debian arhitecture
+  shell: dpkg --print-architecture
+  register: arch
+  when: ansible_os_family == "Debian"
+
+- name: Install additional packages
+  package:
+    name:
+      - python3-pip
+    state: latest
+
+- name: Remove docker packages if already installed
+  apt:
+    name: "docker*"
+    state: absent
+
+- name: Remove docker files if they exist
+  file:
+    name: "{{ item }}"
+    state: absent
+  loop:
+    - '/var/lib/docker'
+    - '/var/run/docker.sock'
+    - '/usr/bin/docker-compose'
+
+- name: Remove podman packages if already installed
+  apt:
+    name: "podman*"
+    state: absent
+  ignore_errors: True
+
+# Reboot after docker/podman is removed
+- name: Reboot host
+  reboot:
+    connect_timeout: "{{ reboot_connect_timeout }}"
+    post_reboot_delay: "{{ reboot_post_reboot_delay }}"
+    reboot_timeout: "{{ reboot_timeout }}"
+
+- name: Add an apt docker signing key
+  ansible.builtin.apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+    keyring: /usr/share/keyrings/docker-archive-keyring.gpg
+
+- name: Add specified repository into sources list
+  ansible.builtin.apt_repository:
+    repo: "deb [arch={{ arch.stdout }} signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ lsb_release.stdout }} stable"
+    state: present
+    filename: docker
+
+- name: Create docker configuration directory
+  file:
+    path: /etc/docker
+    state: directory
+    mode: '0700'
+
+- name: Create docker containers directory
+  file:
+    path: /var/containers
+    state: directory
+    mode: '0700'
+
+- name: Copy docker related configuration files
+  copy:
+    src: "{{ item.src }}"
+    dest: "/etc/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - { src: 'docker/daemon.json', dest: 'docker/daemon.json' }
+    - { src: 'docker/docker-logrotate.conf', dest: 'logrotate.d/docker.conf' }
+    - { src: 'docker/docker-rsyslog.conf', dest: 'rsyslog.d/10-docker.conf' }
+
+- name: Install or upgrade pip packages
+  pip:
+    name:
+      - docker=={{ pip_docker_version }}
+      - docker-compose=={{ pip_docker_compose_version }}
+    executable: pip3
+
+- name: Install docker-compose
+  get_url:
+    url: "https://github.com/docker/compose/releases/download/{{ docker_compose_version }}/docker-compose-linux-x86_64"
+    dest: /usr/bin/docker-compose
+    mode: '0744'
+
+- name: Install docker packages
+  apt:
+    name: "{{ docker_ce_version }}"
+    state: present
+    update_cache: yes
+
+- name: Get running containers
+  docker_host_info:
+    containers: yes
+  register: docker_info
+
+- name: Destroy stopped containers
+  docker_container:
+    name: "{{ item }}"
+    state: absent
+  loop: "{{ docker_info.containers | map(attribute='Id') | list }}"
+
+# Reboot after docker/podman is installed
+- name: Reboot host
+  reboot:
+    connect_timeout: "{{ reboot_connect_timeout }}"
+    post_reboot_delay: "{{ reboot_post_reboot_delay }}"
+    reboot_timeout: "{{ reboot_timeout }}"
+
+- name: Create logging dir if does not exist
+  file:
+    path: /root/logging
+    state: directory
+    mode: '0755'
+
+- name: Copy docker-compose config files
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/root/logging/{{ item }}.yml"
+    owner: root
+    group: root
+    mode: u=rw,g=rw,o=r
+  loop:
+    - docker-compose
+
+#nginx
+- name: Create nginx and ssl directory if it does not exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /root/logging/nginx/
+    - /root/logging/nginx/ssl
+
+- name: copy nginx.conf from template
+  ansible.builtin.template:
+    src: "nginx/nginx.j2"
+    dest: "/root/logging/nginx/nginx.conf"
+    owner: root
+    group: root
+    mode: u=rw,g=r,o=r
+  tags: logging_nginx_conf_changed
+
+- name: copy cert files from ansible-vault
+  copy:
+    content: "{{ item.content}}"
+    dest: "/root/logging/nginx/ssl/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "u=rw,g=r,o="
+  loop:
+    - "{{ tino_certificate }}"
+  tags: logging_ssl
+
+- name: copy cert key files from ansible-vault 
+  copy:
+    content: "{{ item.content}}"
+    dest: "/root/logging/nginx/ssl/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "u=rw,g=r,o="
+  loop:
+    - "{{ tino_certificate_key }}"
+  tags: logging_ssl
+
+#run logging stack with docker-compose
+- name: Delete existing logging services if exist
+  community.docker.docker_compose:
+    project_src: /root/logging/
+    state: absent
+
+- name: Create and start logging services
+  community.docker.docker_compose:
+    project_src: /root/logging/
+  register: output
+
+- ansible.builtin.debug:
+    var: output
+
+- name: Restart all services
+  community.docker.docker_compose:
+    project_src: /root/logging/
+    build: no
+    services:
+      - cerebro
+      - elasticsearch
+      - kibana
+    restarted: yes
+  tags: [ 'never', 'cerebro_changed', 'elasticsearch_changed', 'kibana_changed' ]
