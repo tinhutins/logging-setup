@@ -79,18 +79,11 @@ http {
 
 
   server {
-  listen      80 default_server;
-  return 301  https://$host$request_uri;
-  }
-
-  server {
-    listen 443 ssl;
+    listen      80 default_server;
     server_name {{kibana_url}};
-    ssl_certificate     /etc/nginx/ssl/tino-crt.crt;
-    ssl_certificate_key /etc/nginx/ssl/tino-key-file.pem;
 
     location / {
-      proxy_pass http://{{ansible_host}}:5601;
+        proxy_pass http://{{ansible_host}}:5601;
     }
   }
 

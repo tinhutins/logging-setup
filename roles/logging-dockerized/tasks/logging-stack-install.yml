@@ -150,28 +150,6 @@
     mode: u=rw,g=r,o=r
   tags: logging_nginx_conf_changed
 
-- name: copy cert files from ansible-vault
-  copy:
-    content: "{{ item.content}}"
-    dest: "/root/logging/nginx/ssl/{{ item.name }}"
-    owner: root
-    group: root
-    mode: "u=rw,g=r,o="
-  loop:
-    - "{{ tino_certificate }}"
-  tags: logging_ssl
-
-- name: copy cert key files from ansible-vault 
-  copy:
-    content: "{{ item.content}}"
-    dest: "/root/logging/nginx/ssl/{{ item.name }}"
-    owner: root
-    group: root
-    mode: "u=rw,g=r,o="
-  loop:
-    - "{{ tino_certificate_key }}"
-  tags: logging_ssl
-
 #run logging stack with docker-compose
 - name: Delete existing logging services if exist
   community.docker.docker_compose:
