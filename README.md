@@ -1,4 +1,4 @@
-# Prometheus with Grafana using Ansible
+# ELK using ansible
 
 In this project, we are configure ELK stack on single node using docker, docker-compose and ansible.
 
