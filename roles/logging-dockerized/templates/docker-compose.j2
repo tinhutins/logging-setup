@@ -39,7 +39,7 @@ services:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     restart: unless-stopped
 
-  logging-nginx: 
+  nginx: 
     container_name: logging-nginx
     image: nginx:{{ docker_nginx_version }}
     environment:
@@ -52,6 +52,16 @@ services:
       - /root/logging/nginx/ssl:/etc/nginx/ssl/
     mem_limit: 512m
     restart: always
+  
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:{{ stack_version }}
+    container_name: "filebeat"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./filebeat.docker.yml:/usr/share/filebeat/filebeat.yml:ro
+    command: filebeat -e -strict.perms=false
+    user: root
 
 volumes:
   elasticsearch-data:
