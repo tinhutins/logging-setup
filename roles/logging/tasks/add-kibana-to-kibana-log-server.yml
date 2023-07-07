@@ -17,9 +17,16 @@
 # - name: Exec to elastic container and generate kibana pass
 #   community.docker.docker_container_exec:
 #     container: elasticsearch
-#     command: '/usr/bin/curl -s -X POST --cacert /usr/share/elasticsearch/config/certificates/tino-fullchain.crt -u elastic:{{elastic_password}} -H "Content-Type: application/json" https://{{ansible_hostname}}.{{int_domain_name}}:9200/_xpack/security/user/kibana/_password -d "{\"password\":\"{{kibana_password}}\"}"'
+#     command: '/usr/bin/curl -s -X POST --cacert /usr/share/elasticsearch/config/certificates/cratis-fullchain.crt -u elastic:{{elastic_password}} -H "Content-Type: application/json" https://{{ansible_hostname}}.{{int_domain_name}}:9200/_security/user/kibana_system/_password -d "{\"password\":\"{{kibana_password}}\"}"'
 #   when: inventory_hostname in groups['logging_cluster'][0]
 
+#Running this because for some reason kibana break if the password isn't reset
+- name: Exec to elastic container and reset elastic password
+  community.docker.docker_container_exec:
+    container: elasticsearch
+    command: '/usr/bin/curl -s -X POST --cacert /usr/share/elasticsearch/config/certificates/cratis-fullchain.crt -u elastic:{{elastic_password}} -H "Content-Type: application/json" https://{{ansible_hostname}}.{{int_domain_name}}:9200/_security/user/elastic/_password -d "{\"password\":\"{{elastic_password}}\"}"'
+  when: inventory_hostname in groups['logging_cluster'][0]
+  
 - name: Create and start kibana service
   community.docker.docker_compose:
     project_src: /var/containers
