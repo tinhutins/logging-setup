@@ -1,6 +1,6 @@
 ---
 - name: Register elastic CA
-  command: cat /var/containers/logging/certs/tino-root.crt
+  command: cat /var/containers/logging/certs/cratis-root.crt
   register: ca_register
   delegate_to: "{{ groups['logging_cluster'][0] }}"
 
@@ -13,12 +13,11 @@
     mode: g=rwx
   tags: kibana_config_changed
 
-# # ispod task prosel rucno ipak nije - moral rucno resetirati pass s elastic containera - https://discuss.elastic.co/t/authentication-of-kibana-system-was-terminated-by-realm-reserved-failed-to-authenticate-user-kibana-system/309395/3
-# - name: Exec to elastic container and generate kibana pass
-#   community.docker.docker_container_exec:
-#     container: elasticsearch
-#     command: '/usr/bin/curl -s -X POST --cacert /usr/share/elasticsearch/config/certificates/cratis-fullchain.crt -u elastic:{{elastic_password}} -H "Content-Type: application/json" https://{{ansible_hostname}}.{{int_domain_name}}:9200/_security/user/kibana_system/_password -d "{\"password\":\"{{kibana_password}}\"}"'
-#   when: inventory_hostname in groups['logging_cluster'][0]
+- name: Exec to elastic container and generate kibana pass
+  community.docker.docker_container_exec:
+    container: elasticsearch
+    command: '/usr/bin/curl -s -X POST --cacert /usr/share/elasticsearch/config/certificates/cratis-fullchain.crt -u elastic:{{elastic_password}} -H "Content-Type: application/json" https://{{ansible_hostname}}.{{int_domain_name}}:9200/_security/user/kibana_system/_password -d "{\"password\":\"{{kibana_password}}\"}"'
+  when: inventory_hostname in groups['logging_cluster'][0]
 
 #Running this because for some reason kibana break if the password isn't reset
 - name: Exec to elastic container and reset elastic password
@@ -26,7 +25,14 @@
     container: elasticsearch
     command: '/usr/bin/curl -s -X POST --cacert /usr/share/elasticsearch/config/certificates/cratis-fullchain.crt -u elastic:{{elastic_password}} -H "Content-Type: application/json" https://{{ansible_hostname}}.{{int_domain_name}}:9200/_security/user/elastic/_password -d "{\"password\":\"{{elastic_password}}\"}"'
   when: inventory_hostname in groups['logging_cluster'][0]
-  
+
+- name: Restart elastic service after configuration change
+  community.docker.docker_compose:
+    project_src: /var/containers
+    services: 
+      - elasticsearch
+    restarted: true
+
 - name: Create and start kibana service
   community.docker.docker_compose:
     project_src: /var/containers
@@ -35,6 +41,7 @@
 - name: Restart kibana service after configuration change
   community.docker.docker_compose:
     project_src: /var/containers
-    services: kibana
+    services: 
+      - kibana
     restarted: true
   tags: ['never', 'kibana_config_changed']
