@@ -1,0 +1,8 @@
+---
+reboot_connect_timeout: 5
+reboot_post_reboot_delay: 15
+reboot_timeout: 600
+
+#Logging volume variables
+volume_data: "/var/containers/logging/data"
+volume_certs: "/var/containers/logging/certs"

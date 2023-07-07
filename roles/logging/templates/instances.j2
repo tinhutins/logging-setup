@@ -1,0 +1,9 @@
+instances:
+{% for server in groups['logging_cluster'] %}
+  - name: {{hostvars[server]['ansible_facts']['hostname']}}.{{int_domain_name}}
+    dns: 
+      - {{hostvars[server]['ansible_facts']['hostname']}}.{{int_domain_name}}
+    ip:
+      - {{hostvars[server]['ansible_facts']['default_ipv4']['address']}}
+
+{% endfor %}

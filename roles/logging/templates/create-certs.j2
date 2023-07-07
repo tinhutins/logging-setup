@@ -1,0 +1,31 @@
+version: '2.2'
+
+services:
+  create_certs:
+    container_name: create_certs
+    image: docker.elastic.co/elasticsearch/elasticsearch:{{ elk_version }}
+    command: >
+      bash -c '
+        if [[ ! -f /certs/ca.zip ]]; then
+          echo "Creating CA";
+          bin/elasticsearch-certutil ca --silent --pem --days 18262 -out /certs/ca.zip;
+          unzip /certs/ca.zip -d /certs;
+        fi;
+        if [[ ! -f /certs/bundle.zip ]]; then
+          echo "Creating certs";
+          bin/elasticsearch-certutil cert --silent --pem --days 18262 -out /certs/bundle.zip --in config/certificates/instances.yml --ca-cert /certs/ca/ca.crt --ca-key /certs/ca/ca.key;
+          unzip /certs/bundle.zip -d /certs; 
+        fi;
+        chown -R 1000:0 /certs
+      '
+    user: "0"
+    working_dir: /usr/share/elasticsearch
+    volumes:
+      - type: bind
+        source: /var/containers/logging/extra/instances.yml
+        target: /usr/share/elasticsearch/config/certificates/instances.yml
+        read_only: true
+      - type: bind
+        source: {{ volume_certs }}
+        target: /certs
+        read_only: false

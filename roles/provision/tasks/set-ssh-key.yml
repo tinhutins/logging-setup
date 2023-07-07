@@ -1,0 +1,14 @@
+---
+- name: Generate an OpenSSH keypair with the default values (4096 bits, rsa)
+  openssh_keypair:
+    path: /root/.ssh/id_rsa
+    owner: root
+    group: root
+  delegate_to: localhost
+
+- name: Set authorized key taken from file
+  authorized_key:
+    user: root
+    state: present
+    key: "{{ lookup('file', '/root/.ssh/id_rsa.pub') }}"
+  become: true

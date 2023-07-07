@@ -1,0 +1,15 @@
+---
+- name: Installing elasticsearch
+  import_tasks: add-elasticsearch-to-log-servers.yml
+  when: inventory_hostname in groups['logging_cluster'][0]
+  tags: [ 'never', 'add_elasticsearch' ]
+
+- name: Installing kibana
+  import_tasks: add-kibana-to-kibana-log-server.yml
+  when: inventory_hostname == groups['logging_cluster'][0]
+  tags: [ 'never', 'add_kibana' ]
+
+- name: Install fleet server
+  import_tasks: add-fleet-to-elastic.yml
+  when: inventory_hostname in groups['logging_cluster'][0]
+  tags: [ 'never', 'add_fleet' ]

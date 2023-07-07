@@ -1,0 +1,176 @@
+version: '2.2'
+
+services:
+  node-exporter:
+    container_name: node-exporter
+    image: prom/node-exporter:{{ docker_node_exporter_version }}
+    ports:
+      - 9100:9100
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.disable-defaults'
+      - '--collector.cpu'
+      - '--collector.meminfo'
+      - '--collector.vmstat'
+      - '--collector.diskstats'
+      - '--collector.processes'
+      - '--collector.filesystem'
+      - '--collector.netstat'
+      - '--collector.netdev'
+      - '--collector.loadavg'
+      - '--collector.os'
+      - '--collector.stat'
+      - '--collector.time'
+    restart: always
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:{{ docker_cadvisor_version }}
+    container_name: cadvisor
+    volumes:
+      - type: bind
+        source: /
+        target: /rootfs
+        read_only: true
+      - type: bind
+        source: /var/run
+        target: /var/run
+        read_only: true
+      - type: bind
+        source: /sys
+        target: /sys
+        read_only: true
+      - type: bind
+        source: /dev/disk/
+        target: /dev/disk/
+        read_only: true
+    ports:
+      - 8090:8080
+    command:
+    - "--enable_metrics=cpu,cpuLoad,disk,diskIO,memory,oom_event,network"
+    - "--store_container_labels=false"
+    - "--docker_only=true"
+    logging:
+      driver: journald
+      options:
+        tag: docker-cadvisor
+    restart: always
+
+  elasticsearch:
+    container_name: elasticsearch
+    network_mode: "host" 
+    image: docker.elastic.co/elasticsearch/elasticsearch:{{ elk_version }}
+    volumes:
+      - type: bind
+        source: {{ volume_data }}
+        target: /usr/share/elasticsearch/data
+        read_only: false
+      - type: bind
+        source: {{ volume_certs }}
+        target: /usr/share/elasticsearch/config/certificates
+        read_only: true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    mem_limit: 6g
+    environment:
+      - cluster.name=logging_cluster
+      - node.name={{ ansible_hostname }}.{{int_domain_name}}
+      - network.host=0.0.0.0
+      - http.port=9200
+      - bootstrap.memory_lock=true
+      - ELASTIC_PASSWORD={{ elastic_password }}
+      - discovery.type=single-node
+      - xpack.security.authc.api_key.enabled=true
+      - xpack.security.enabled=true
+      - xpack.license.self_generated.type=basic
+      - xpack.monitoring.collection.enabled=true
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.verification_mode=certificate
+      - xpack.security.http.ssl.certificate_authorities=/usr/share/elasticsearch/config/certificates/tino-fullchain.crt
+      - xpack.security.http.ssl.certificate=/usr/share/elasticsearch/config/certificates/tino-entity.crt
+      - xpack.security.http.ssl.key=/usr/share/elasticsearch/config/certificates/tino-key-file.pem
+      - xpack.security.transport.ssl.enabled=true
+      - xpack.security.transport.ssl.verification_mode=certificate
+      - xpack.security.transport.ssl.certificate_authorities=/usr/share/elasticsearch/config/certificates/tino-fullchain.crt
+      - xpack.security.transport.ssl.certificate=/usr/share/elasticsearch/config/certificates/tino-entity.crt
+      - xpack.security.transport.ssl.key=/usr/share/elasticsearch/config/certificates/tino-key-file.pem
+    logging:
+      driver: journald
+      options:
+        tag: docker-elasticsearch
+    restart: always
+
+  elastic-fleet-server:
+    network_mode: "host"
+    image: docker.elastic.co/beats/elastic-agent:{{ elk_version }}
+    volumes:
+      - type: bind
+        source: {{ volume_certs }}
+        target: /certs
+    container_name: elastic-fleet-server
+    environment:
+      - FLEET_SERVER_ELASTICSEARCH_HOST=https://{{ groups['logging_cluster'][0] }}.{{int_domain_name}}:9200
+      - FLEET_URL=https://{{ groups['logging_cluster'][0] }}.{{int_domain_name}}:8220
+      - FLEET_SERVER_ENABLE=true
+      - FLEET_SERVER_POLICY=fleet-server-policy
+      - FLEET_CA=/certs/tino-fullchain.crt
+      - FLEET_SERVER_ELASTICSEARCH_CA=/certs/tino-fullchain.crt
+      - FLEET_SERVER_CERT=/certs/tino-entity.crt
+      - FLEET_SERVER_CERT_KEY=/certs/tino-key-file.pem
+      - FLEET_SERVER_SERVICE_TOKEN=placeholder
+      - CERTIFICATE_AUTHORITIES=/certs/tino-fullchain.crt
+    logging:
+      driver: journald
+      options:
+        tag: docker-fleet-server
+    restart: always
+
+  kibana:
+    container_name: kibana
+    image: docker.elastic.co/kibana/kibana:{{ elk_version }}
+    ports:
+      - 443:5601
+    mem_limit: 6g
+    environment:
+      SERVER_NAME: {{ kibana_url }}
+      ELASTICSEARCH_HOSTS: '[{% for server in groups['logging_cluster'] %}"https://{{hostvars[server]['ansible_facts']['hostname']}}.{{int_domain_name}}:9200"{{ "," if not loop.last }}{% endfor %}]'
+      ELASTICSEARCH_USERNAME: kibana_system
+      ELASTICSEARCH_PASSWORD: {{ kibana_password }}
+      ELASTICSEARCH_SSL_VERIFICATIONMODE: certificate
+      ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES: /usr/share/kibana/config/certificates/tino-fullchain.crt
+      SERVER_SSL_ENABLED: "true"
+      SERVER_SSL_CERTIFICATE: /usr/share/kibana/config/certificates/tino-entity.crt
+      SERVER_SSL_KEY: /usr/share/kibana/config/certificates/tino-key-file.pem
+      XPACK_SECURITY_ENABLED: "true"
+      XPACK_SECURITY_ENCRYPTIONKEY: "{{ xpack_security_encryptionkey }}"
+      XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY: "{{ xpack_encryptedsavedobjects_encryptionkey }}"
+      XPACK_REPORTING_ENCRYPTIONKEY: "{{ xpack_reporting_encryptionkey }}"
+    volumes:
+      - type: bind
+        source: {{ volume_certs }}
+        target: /usr/share/kibana/config/certificates
+        read_only: false
+      - type: bind
+        source: /var/containers/logging/extra/kibana.yml
+        target: /usr/share/kibana/config/kibana.yml
+        read_only: true
+    logging:
+      driver: journald
+      options:
+        tag: docker-kibana
+    restart: always
+    extra_hosts:
+    {% for server in groups['logging_cluster'] %}
+      - "{{hostvars[server]['ansible_facts']['hostname']}}.{{int_domain_name}}:{{hostvars[server]['ansible_facts']['default_ipv4']['address']}}" {% endfor %}
+    
