@@ -82,12 +82,13 @@ services:
       nofile:
         soft: 65536
         hard: 65536
-    mem_limit: 6g
+    mem_limit: 2g
     environment:
       - cluster.name=logging_cluster
       - node.name={{ ansible_hostname }}.{{int_domain_name}}
       - network.host=0.0.0.0
       - http.port=9200
+      #- transport.port=9300
       - bootstrap.memory_lock=true
       - ELASTIC_PASSWORD={{ elastic_password }}
       - discovery.type=single-node
@@ -141,7 +142,7 @@ services:
     image: docker.elastic.co/kibana/kibana:{{ elk_version }}
     ports:
       - 443:5601
-    mem_limit: 6g
+    mem_limit: 2g
     environment:
       SERVER_NAME: {{ kibana_url }}
       ELASTICSEARCH_HOSTS: '[{% for server in groups['logging_cluster'] %}"https://{{hostvars[server]['ansible_facts']['hostname']}}.{{int_domain_name}}:9200"{{ "," if not loop.last }}{% endfor %}]'
@@ -172,5 +173,5 @@ services:
     restart: always
     extra_hosts:
     {% for server in groups['logging_cluster'] %}
-      - "{{hostvars[server]['ansible_facts']['hostname']}}.{{int_domain_name}}:{{hostvars[server]['ansible_facts']['default_ipv4']['address']}}" {% endfor %}
+    - "{{hostvars[server]['ansible_facts']['hostname']}}.{{int_domain_name}}:{{hostvars[server]['ansible_facts']['default_ipv4']['address']}}" {% endfor %}
     
