@@ -42,13 +42,20 @@
     state: started
 
 - name: Sync time
-  shell: "chronyc -a makestep"
-  args:
-    warn: false
+  ansible.builtin.shell: "chronyc -a makestep"
 
-- name: Set authorized key for cratis devops team
+- name: Set authorized key for devops team
   authorized_key:
     user: root
+    state: present
+    key: "{{ item }}"
+  with_file:
+    - public_keys/tino-rsa
+  tags: set_users_ssh_keys
+
+- name: Set authorized key for devops team
+  authorized_key:
+    user: tino
     state: present
     key: "{{ item }}"
   with_file:
@@ -65,24 +72,24 @@
       export HISTFILESIZE=30000
       export HISTCONTROL=ignoredups
 
-# Debian Family upgrade
-- name: Update all packages to their latest version
-  apt:
-    name: "*"
-    state: latest
-  when: ansible_os_family == "Debian"
+# # Debian Family upgrade
+# - name: Update all packages to their latest version
+#   apt:
+#     name: "*"
+#     state: latest
+#   when: ansible_os_family == "Debian"
 
-# Install additional packages
-- name: Install packages
-  package:
-    name: "{{ packages }}"
-    state: present
+# # Install additional packages
+# - name: Install packages
+#   package:
+#     name: "{{ packages }}"
+#     state: present
 
-# Does a distro upgrade
-- name: Upgrade the OS (apt-get dist-upgrade)
-  apt:
-    upgrade: dist
-  when: ansible_os_family == "Debian"
+# # Does a distro upgrade
+# - name: Upgrade the OS (apt-get dist-upgrade)
+#   apt:
+#     upgrade: dist
+#   when: ansible_os_family == "Debian"
 
 # Reboot after upgrade
 - name: Reboot host

@@ -1,0 +1,110 @@
+user                 nginx;
+worker_processes     auto;
+worker_rlimit_nofile 65535;
+error_log            /var/log/nginx/error_log warn;
+pid                  /var/run/nginx.pid;
+
+events {
+	  worker_connections 8192;
+    use                epoll;
+    multi_accept       on;
+}
+
+http {
+  
+    # https://www.nginx.com/blog/thread-pools-boost-performance-9x/
+    aio threads;
+
+    # SSL Hardening
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                               '$status $body_bytes_sent "$http_referer" '
+                               '"$http_user_agent" $upstream_cache_status $host';
+
+    access_log  /var/log/nginx/access.log main;
+
+    # TCP tuning
+    keepalive_timeout         65;
+    tcp_nopush	              off;
+    tcp_nodelay               on;
+    reset_timedout_connection on; # allow the server to close connection on non responding client, this will free up memory
+    send_timeout              45;  # if client stop responding, free up memory -- default 60
+    
+    # GZIP setup
+    gzip       on;
+    gzip_types application/json application/x-javascript application/javascript application/xml application/xml+rss text/plain text/css text/xml text/javascript image/svg+xml;
+
+
+    # Additional headers
+    add_header X-Frame-Options SAMEORIGIN;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubdomains; preload";
+    add_header X-Proxy-Cache  $upstream_cache_status;
+  
+    proxy_set_header Host        $host;
+    proxy_set_header X-Real-IP   $remote_addr;
+    proxy_set_header X-Client-IP $remote_addr;
+
+    set_real_ip_from  0.0.0.0/0;
+    real_ip_header    X-Forwarded-For;
+
+    # Proxy settings
+    proxy_buffering         on;
+    proxy_read_timeout      1800s;
+    proxy_send_timeout      1800s;
+    proxy_buffers           4 512k;
+    proxy_buffer_size       512k;
+    proxy_busy_buffers_size 512k;
+
+
+   # Other custom config variables
+    client_header_timeout            3m;
+    client_body_timeout              3m;
+    client_max_body_size           128m;
+    client_body_buffer_size        256k;
+    client_header_buffer_size        3m;
+    large_client_header_buffers  4 256k;
+    server_names_hash_max_size     2048;
+    server_names_hash_bucket_size   256;
+
+    # http://www.revsys.com/12days/nginx-tuning/
+    open_file_cache max=200000 inactive=20s;
+    open_file_cache_valid               30s;
+    open_file_cache_min_uses              5;
+    open_file_cache_errors              off;
+
+
+  server {
+    listen      80 default_server;
+    server_name {{kibana_url}};
+    return 301 https://{{kibana_url}}$request_uri;
+
+  }
+
+  server {
+  server_name {{kibana_url}};
+  listen 443 http2 ssl;
+  proxy_http_version 1.1; # Nuxt - https://github.com/nuxt/nuxt/issues/12003
+  ssl_certificate_key /etc/nginx/ssl/tino-key-file.pem;
+  ssl_certificate     /etc/nginx/ssl/tino-fullchain.crt;
+  ssl_protocols TLSv1.2 TLSv1.3;
+    
+  location / {
+        proxy_pass http://{{ansible_host}}:5601;
+        proxy_ssl_verify off;  # self-signed certificate is used on kibana
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port 443;
+    }
+  
+  }
+}

@@ -1,0 +1,38 @@
+- name: Create filebeat directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: 1000
+    group: 1000
+    mode: '0755'
+  loop:
+    - /var/containers/logging/filebeat/config/
+    - /var/containers/logging/filebeat/data/
+  tags: create
+
+- name: Copy filebeat docker-compose file
+  ansible.builtin.template:
+    src: "docker-compose-filebeat.j2"
+    dest: "/var/containers/logging/filebeat/docker-compose.yml"
+    owner: root
+    group: root
+    mode: u=rw,g=rw,o=r
+  tags: copy
+
+- name: Copy filebeat configuration from template
+  ansible.builtin.template:
+    src: "filebeat.j2"
+    dest: "/var/containers/logging/filebeat/config/filebeat.yml"
+    owner: root
+    group: root
+    mode: u=rw,g=r,o=r
+  tags: copy
+
+- name: Start filebeat
+  community.docker.docker_compose_v2:
+    project_src: /var/containers/logging/filebeat
+    files: docker-compose.yml
+    state: present
+    services:
+      - filebeat
+  tags: start

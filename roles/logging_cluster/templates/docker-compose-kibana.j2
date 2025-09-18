@@ -1,0 +1,52 @@
+version: '2.2'
+
+services:
+  nginx:
+    container_name: nginx
+    image: nginx:{{ docker_nginx_version }}
+    environment:
+      - TZ=Europe/Zagreb
+    ports:
+      - 80:80/tcp
+      - 443:443/tcp
+    volumes:
+      - /var/containers/logging/kibana/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - /var/containers/logging/kibana/nginx/ssl:/etc/nginx/ssl/
+    mem_limit: 512m
+    restart: unless-stopped
+
+  kibana:
+    container_name: kibana
+    image: docker.elastic.co/kibana/kibana:{{ elk_version }}
+    ports:
+      - 5601:5601
+    # - 443:5601
+    mem_limit: 2g
+    environment:
+      SERVER_NAME: {{ kibana_url }}
+      ELASTICSEARCH_HOSTS: '[{% for server in groups['logging_cluster'] %}"https://{{hostvars[server]['ansible_facts']['hostname']}}.{{int_domain_name}}:9200"{{ "," if not loop.last }}{% endfor %}]'
+      ELASTICSEARCH_USERNAME: kibana_system
+      ELASTICSEARCH_PASSWORD: {{ kibana_password }}
+      ELASTICSEARCH_SSL_VERIFICATIONMODE: certificate
+      ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES: /usr/share/kibana/config/certificates/ca/ca.crt
+     #SERVER_SSL_ENABLED: "true"
+     #SERVER_SSL_KEY: /usr/share/kibana/config/certificates/{{ansible_hostname}}.{{dns_domain_name}}/{{ansible_hostname}}.{{dns_domain_name}}.key
+     #SERVER_SSL_CERTIFICATE: /usr/share/kibana/config/certificates/{{ansible_hostname}}.{{dns_domain_name}}/{{ansible_hostname}}.{{dns_domain_name}}.crt
+    volumes:
+      - type: bind
+        source: {{ volume_certs }}
+        target: /usr/share/kibana/config/certificates
+        read_only: false
+      - type: bind
+        source:  /var/containers/logging/kibana/kibana.yml
+        target: /usr/share/kibana/config/kibana.yml
+        read_only: true
+    logging:
+      driver: journald
+      options:
+        tag: docker-kibana
+    restart: always
+    extra_hosts:
+    {% for server in groups['logging_cluster'] %}
+      - "{{ hostvars[server]['ansible_facts']['hostname'] }}.{{ int_domain_name }}:{{ hostvars[server]['ansible_facts']['default_ipv4']['address'] }}"
+    {% endfor %}

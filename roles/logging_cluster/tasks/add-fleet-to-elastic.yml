@@ -1,0 +1,46 @@
+---
+# The following tasks are curl API calls to kibana to enable fleet policies and other fleet related things
+
+- name: Show Fleet setup URL
+  ansible.builtin.debug:
+    msg: "https://{{ ansible_hostname }}.{{ dns_domain_name }}:443/api/fleet/setup"
+  when: inventory_hostname in groups['logging_cluster'][0]
+
+- name: Enable fleet in Kibana
+  community.docker.docker_container_exec:
+    container: elasticsearch
+    command: "/usr/bin/curl -u elastic:{{elastic_password}} --cacert /usr/share/elasticsearch/config/certificates/ca/ca.crt -s -XPOST http://{{ansible_hostname}}.{{dns_domain_name}}:5601/api/fleet/setup --header 'kbn-xsrf: true'"
+  when: inventory_hostname in groups['logging_cluster'][0]
+
+- name: Create default fleet policy
+  community.docker.docker_container_exec:
+    container: elasticsearch
+    command: |
+      /usr/bin/curl -u elastic:{{elastic_password}} --cacert /usr/share/elasticsearch/config/certificates/ca/ca.crt http://{{ansible_hostname}}.{{dns_domain_name}}:5601/api/fleet/agent_policies?sys_monitoring=true --header 'kbn-xsrf: true' --header 'Content-Type: application/json' --data-raw '{"id":"fleet-server-policy","name":"Fleet Server policy","description":"Ansible generated policy","namespace":"default","monitoring_enabled":["logs","metrics"],"has_fleet_server":true}'
+  when: inventory_hostname in groups['logging_cluster'][0]
+
+- name: Create default agent policy
+  community.docker.docker_container_exec:
+    container: elasticsearch
+    command: |
+      /usr/bin/curl -u elastic:{{elastic_password}} --cacert /usr/share/elasticsearch/config/certificates/ca/ca.crt http://{{ansible_hostname}}.{{dns_domain_name}}:5601/api/fleet/agent_policies?sys_monitoring=true --header 'kbn-xsrf: true' --header 'Content-Type: application/json' --data-raw '{"id":"fleet-agent-policy","name":"Agent Policy","description":"Ansible generated policy","namespace":"default","monitoring_enabled":["logs","metrics"],"has_fleet_server":false}'
+  when: inventory_hostname in groups['logging_cluster'][0]
+
+- name: Set fleet hostnames
+  community.docker.docker_container_exec:
+    container: elasticsearch
+    command: |
+      /usr/bin/curl -u elastic:{{elastic_password}} --cacert /usr/share/elasticsearch/config/certificates/ca/ca.crt -XPUT http://{{ansible_hostname}}.{{dns_domain_name}}:5601/api/fleet/settings --header 'kbn-xsrf: true' --header 'Content-Type: application/json' --data-raw '{"fleet_server_hosts":["https://{{ansible_hostname}}.{{dns_domain_name}}:8220"]}'
+  when: inventory_hostname in groups['logging_cluster'][0]
+
+# # Starting docker services and running fleet server and agent
+# # Comment out till fleet is set up on kibana and the compose is ready for enrollment of fleet server and agents
+# # Generate service token for fleet server enrollment --> https://www.elastic.co/guide/en/elasticsearch/reference/8.8/service-tokens-command.html
+# # then add this generated token to the docker-compose file for fleet server
+- name: Create and start elastic fleet server container
+  community.docker.docker_compose_v2:
+    project_src: /var/containers
+    services:
+      - elastic-fleet-server
+  when: inventory_hostname in groups['logging_cluster'][0]
+  tags: [ 'never', 'start_fleet_server' ]

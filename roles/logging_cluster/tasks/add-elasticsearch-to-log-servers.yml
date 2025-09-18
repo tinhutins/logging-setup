@@ -1,0 +1,490 @@
+---
+- name: Set Elastic servers hosts file
+  template:
+    src: hosts_file.j2
+    dest: /etc/hosts
+
+- name: Register Debian destribution
+  shell: lsb_release -cs
+  register: lsb_release
+  when: ansible_os_family == "Debian"
+
+- name: Register Debian arhitecture
+  shell: dpkg --print-architecture
+  register: arch
+  when: ansible_os_family == "Debian"
+
+- name: Install additional packages
+  package:
+    name:
+      - python3-pip
+    state: latest
+
+- name: Remove docker if already exist
+  apt:
+    name: "{{ item }}"
+    state: absent
+  loop:
+    - 'docker-ce'
+    - 'docker-ce-cli'
+    - 'docker-scan-plugin'
+    - 'docker'
+
+- name: Remove docker files if they exist
+  file:
+    name: "{{ item }}"
+    state: absent
+  loop:
+    - '/var/lib/docker'
+    - '/var/run/docker.sock'
+    - '/usr/bin/docker-compose'
+
+- name: Remove podman packages if already installed
+  apt:
+    name: "podman*"
+    state: absent
+  ignore_errors: True
+
+- name: Delete containers directory
+  file:
+    path: /var/containers
+    state: absent
+
+# Reboot after Docker is removed.
+- name: Reboot host
+  reboot:
+    connect_timeout: "{{ reboot_connect_timeout }}"
+    post_reboot_delay: "{{ reboot_post_reboot_delay }}"
+    reboot_timeout: "{{ reboot_timeout }}"
+
+# Docker/Podman
+- name: Install container engine
+  block:
+    - name: Install docker
+      # when: ansible_facts['distribution_version'] is version('22.04', '<=')
+      block:
+        - name: Add an apt docker signing key
+          ansible.builtin.apt_key:
+            url: https://download.docker.com/linux/ubuntu/gpg
+            state: present
+            keyring: /usr/share/keyrings/docker-archive-keyring.gpg
+
+        - name: Add specified repository into sources list
+          ansible.builtin.apt_repository:
+            repo: "deb [arch={{ arch.stdout }} signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ lsb_release.stdout }} stable"
+            state: present
+            filename: docker
+
+        - name: Create docker configuration directory
+          file:
+            path: /etc/docker
+            state: directory
+            mode: '0700'
+
+        - name: Create docker containers directory
+          file:
+            path: /var/containers
+            state: directory
+            mode: '0700'
+
+        - name: Creat docker log directory
+          file:
+            path: /var/log/docker
+            state: directory
+            owner: syslog
+            group: adm
+            mode: '0700'
+
+        - name: Copy docker related configuration files
+          copy:
+            src: "{{ item.src }}"
+            dest: "/etc/{{ item.dest }}"
+            owner: root
+            group: root
+            mode: '0644'
+          loop:
+            - { src: 'docker/daemon.json', dest: 'docker/daemon.json' }
+            - { src: 'docker/docker-logrotate.conf', dest: 'logrotate.d/docker.conf' }
+            - { src: 'docker/docker-rsyslog.conf', dest: 'rsyslog.d/10-docker.conf' }
+        
+        - name: Install docker and compose from apt instead of pip
+          apt:
+            name:
+              - docker.io
+              - docker-compose-plugin
+            state: present
+            update_cache: yes
+
+        - name: Install docker-compose
+          get_url:
+            url: "https://github.com/docker/compose/releases/download/{{ docker_compose_version }}/docker-compose-linux-x86_64"
+            dest: /usr/bin/docker-compose
+            mode: '0744'
+
+        - name: Install docker packages
+          apt:
+            name: "{{ docker_ce_version }}"
+            state: present
+            update_cache: yes
+
+        - name: Reboot host after docker installation
+          reboot:
+            connect_timeout: "{{ reboot_connect_timeout }}"
+            post_reboot_delay: "{{ reboot_post_reboot_delay }}"
+            reboot_timeout: "{{ reboot_timeout }}"
+
+        - name: Ensure service docker is started and enabled on boot
+          ansible.builtin.systemd_service:
+            state: started
+            enabled: yes
+            daemon_reload: true
+            name: docker
+
+    # - name: Install podman
+    #   when: ansible_facts['distribution_version'] is version('22.04', '>')
+    #   block:
+    #     - name: Install podman package
+    #       apt:
+    #         name: podman
+    #         state: present
+    #         update_cache: yes
+    
+#Tuning
+# ES specific req.
+- name: vm.max_map_count on all nodes
+  ansible.posix.sysctl:
+    name: vm.max_map_count
+    value: '262144'
+    sysctl_set: yes
+    state: present
+    reload: yes
+
+# Do less swapping sysctl kernel parameters
+- name: vm.swappiness
+  ansible.posix.sysctl:
+    name: vm.swappiness
+    value: '10'
+    sysctl_set: yes
+    state: present
+    reload: yes
+
+- name: vm.dirty_ratio
+  ansible.posix.sysctl:
+    name: vm.dirty_ratio
+    value: '60'
+    sysctl_set: yes
+    state: present
+    reload: yes
+
+- name: vm.dirty_background_ratio
+  ansible.posix.sysctl:
+    name: vm.dirty_background_ratio
+    value: '2'
+    sysctl_set: yes
+    state: present
+    reload: yes
+ 
+# Increase number of incoming connections
+- name: net.core.somaxconn
+  ansible.posix.sysctl:
+    name: net.core.somaxconn
+    value: '65536'
+    sysctl_set: yes
+    state: present
+    reload: yes
+
+# Improved congestion control - network stack
+- name: net.core.default_qdisc
+  ansible.posix.sysctl:
+    name: net.core.default_qdisc
+    value: 'fq'
+    sysctl_set: yes
+    state: present
+    reload: yes
+
+- name: net.ipv4.tcp_congestion_control
+  ansible.posix.sysctl:
+    name: net.ipv4.tcp_congestion_control
+    value: 'bbr'
+    sysctl_set: yes
+    state: present
+    reload: yes    
+
+#Create RSA on elastic[0] and copy the public key to the rest of the nodes in the cluster, kibana and so on
+- name: Create RSA
+  block:
+    - name: Create rsa
+      community.crypto.openssh_keypair:
+        path: /root/.ssh/logging_id_ssh_rsa
+        comment: "key for cross server communication from main node"
+      when: inventory_hostname in groups['logging_cluster'][0] 
+
+    - name: Register the public key
+      shell: cat /root/.ssh/logging_id_ssh_rsa.pub
+      register: logging_pub
+      delegate_to: "{{ groups['logging_cluster'] | sort | first }}"
+      run_once: true
+    
+    - name: Copy the pub key to other nodes
+      authorized_key:
+        user: root
+        state: present
+        key: "{{ logging_pub.stdout }}"
+      when: inventory_hostname is in groups['logging_cluster'][0:]
+
+#Files
+- name: Create logging directory if it does not exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  with_items:
+    - /var/containers/logging/extra
+
+- name: Copy logging config files
+  ansible.builtin.template:
+    src: "docker-compose.j2"
+    dest: "/var/containers/docker-compose.yml"
+    owner: root
+    group: root
+    mode: u=rw,g=rw,o=r
+  tags: cert
+
+- name: Copy logging certs files
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/var/containers/logging/extra/{{ item }}.yml"
+    owner: root
+    group: root
+    mode: u=rw,g=rw,o=r
+  loop:
+    - env
+    - instances
+  when: inventory_hostname in groups['logging_cluster'][0]
+
+- name: Copy logging cert config files
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/var/containers/logging/extra/docker-compose.yml"
+    owner: root
+    group: root
+    mode: u=rw,g=rw,o=r
+  tags: cert
+  loop:
+    - create-certs
+  when: inventory_hostname in groups['logging_cluster'][0]
+
+- name: Delete existing logging services if exist
+  community.docker.docker_compose_v2:
+    project_src: /var/containers
+    state: absent
+
+#Clean existing data if exists
+- name: Delete elasticsearch volumes
+  file: 
+    state: absent
+    path: "{{ item }}"
+  loop:
+    - "{{ volume_certs }}"
+    - "{{ volume_data }}"
+
+#Create directories for docker containers
+- name: Create elasticsearch directories
+  file: 
+    state: directory
+    path: "{{ item }}"
+    mode: g=rwx
+    owner: 1000
+    group: 0
+  loop:
+    - "{{ volume_certs }}"
+    - "{{ volume_data }}"
+
+- name: Create elasticsearch SSL certificates
+  community.docker.docker_compose_v2:
+    project_src: /var/containers/logging/extra
+    state: present
+    services:
+      - create_certs
+      # - elasticsearch-key-pkcs8
+  when: inventory_hostname in groups['logging_cluster'][0]
+
+- name: Copy certificates and key from the ansible-vault
+  copy:
+    content: "{{ item.content }}"
+    dest: "{{ volume_certs }}/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "u=rw,g=r,o="
+  loop:
+    - "{{ tino_certificate }}"
+    - "{{ tino_root_certificate }}"
+    - "{{ tino_entity_certificate }}"
+    - "{{ tino_certificate_key }}"
+
+#Rsync certs folder to other nodes
+# if it doesnt work for some reason use this manual commands on the first node
+# rsync -Pav -e "ssh -i ~/.ssh/logging_id_ssh_rsa" /var/containers/logging/certs/ root@192.168.6.130:/var/containers/logging/certs/
+# rsync -Pav -e "ssh -i ~/.ssh/logging_id_ssh_rsa" /var/containers/logging/certs/ root@192.168.6.129:/var/containers/logging/certs/
+- name: Rsync certs directory from main node to others
+  synchronize:
+    src: "{{ volume_certs }}/"
+    dest: "{{ volume_certs }}/"
+    private_key: /root/.ssh/logging_id_ssh_rsa
+  loop: "{{ groups['logging_cluster'][1:] }}"
+  delegate_to: "{{ groups['logging_cluster'][0] }}"
+  run_once: true
+
+#Setting up password on the first elastic node
+- name: Make sure elastic_password is only set first elastic host
+  ansible.builtin.lineinfile:
+    path: /var/containers/docker-compose.yml
+    state: absent
+    regexp: 'ELASTIC_PASSWORD'
+  when: inventory_hostname in groups['logging_cluster'] and inventory_hostname != groups['logging_cluster'][0]
+
+- name: Create and start logging elasticsearch services
+  community.docker.docker_compose_v2:
+    project_src: /var/containers
+    services:
+      - elasticsearch
+      - node-exporter
+      - cadvisor
+
+- name: Wait for port 9200 to become open on the host, don't start checking for 60 seconds
+  wait_for:
+    port: 9200
+    delay: 60
+  when: inventory_hostname in groups['logging_cluster'][0]
+
+#create ILM, index template, data stream for docker logs
+- name: Create ILM policy for logs-docker
+  uri:
+    url: "https://{{ ansible_hostname }}.{{ dns_domain_name }}:9200/_ilm/policy/logs-docker-ilm"
+    method: PUT
+    user: elastic
+    password: "{{ elastic_password }}"
+    body_format: json
+    validate_certs: no
+    body:
+      policy:
+        phases:
+          hot:
+            actions:
+              rollover:
+                max_size: "1gb"
+                max_age: "1d"
+          delete:
+            min_age: "5d"
+            actions:
+              delete: {}
+    status_code: [200, 201]
+  when: inventory_hostname in groups['logging_cluster'][0]
+
+- name: Create common component template for logs mappings
+  uri:
+    url: "https://{{ ansible_hostname }}.{{ dns_domain_name }}:9200/_component_template/logs-common-mappings"
+    method: PUT
+    user: elastic
+    password: "{{ elastic_password }}"
+    body_format: json
+    validate_certs: no
+    body:
+      template:
+        mappings:
+          dynamic: true
+          properties:
+            "@timestamp": { "type": "date" }
+            host:
+              properties:
+                name: { "type": "keyword" }
+            message: { "type": "text" }
+            log_type: { "type": "keyword" }
+    status_code: [200, 201]
+  when: inventory_hostname == groups['logging_cluster'][0]
+  
+- name: Create index template for logs data stream
+  uri:
+    url: "https://{{ ansible_hostname }}.{{ dns_domain_name }}:9200/_index_template/logs-docker-template"
+    method: PUT
+    user: elastic
+    password: "{{ elastic_password }}"
+    body_format: json
+    validate_certs: no
+    body:
+      index_patterns: ["logs-docker-*"]
+      data_stream: {}
+      priority: 500
+      composed_of: ["logs-docker-mappings"]
+      template:
+        settings:
+          number_of_shards: 1       # adjust as needed
+          number_of_replicas: 1     # add replicas here
+          index.lifecycle.name: "logs-docker-ilm"
+    status_code: [200, 201]
+  when: inventory_hostname in groups['logging_cluster'][0]
+
+- name: Create logs-docker-testing data stream
+  uri:
+    url: "https://{{ ansible_hostname }}.{{ dns_domain_name }}:9200/_data_stream/logs-docker-testing"
+    method: PUT
+    user: elastic
+    password: "{{ elastic_password }}"
+    validate_certs: no
+    status_code: [200, 201]
+  when: inventory_hostname in groups['logging_cluster'][0]
+
+#create ILM, index template, data stream for sys logs
+- name: Create ILM policy for logs-system
+  uri:
+    url: "https://{{ ansible_hostname }}.{{ dns_domain_name }}:9200/_ilm/policy/logs-system-ilm"
+    method: PUT
+    user: elastic
+    password: "{{ elastic_password }}"
+    body_format: json
+    validate_certs: no
+    body:
+      policy:
+        phases:
+          hot:
+            actions:
+              rollover:
+                max_size: "2gb"
+                max_age: "7d"
+          delete:
+            min_age: "14d"
+            actions:
+              delete: {}
+    status_code: [200, 201]
+  when: inventory_hostname == groups['logging_cluster'][0]
+
+- name: Create index template for System logs
+  uri:
+    url: "https://{{ ansible_hostname }}.{{ dns_domain_name }}:9200/_index_template/logs-system-template"
+    method: PUT
+    user: elastic
+    password: "{{ elastic_password }}"
+    body_format: json
+    validate_certs: no
+    body:
+      index_patterns: ["logs-system-*"]
+      data_stream: {}
+      priority: 500
+      composed_of: ["logs-common-mappings"]
+      template:
+        settings:
+          number_of_shards: 1
+          number_of_replicas: 1
+          index.lifecycle.name: "logs-system-ilm"
+    status_code: [200, 201]
+  when: inventory_hostname == groups['logging_cluster'][0]
+
+- name: Create logs-system-testing data stream
+  uri:
+    url: "https://{{ ansible_hostname }}.{{ dns_domain_name }}:9200/_data_stream/logs-system-testing"
+    method: PUT
+    user: elastic
+    password: "{{ elastic_password }}"
+    validate_certs: no
+    status_code: [200, 201]
+  when: inventory_hostname == groups['logging_cluster'][0]

@@ -1,0 +1,56 @@
+---
+
+- name: Create logstash directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: 1000
+    group: 1000
+    mode: '0755'
+  loop:
+    - /var/containers/logging/logstash/config/
+    - /var/containers/logging/logstash/pipeline/
+  tags: create
+
+# Logstash
+
+- name: Copy logstash docker file
+  ansible.builtin.template:
+    src: "docker-compose-logstash-log-server.j2"
+    dest: "/var/containers/logging/logstash/docker-compose.yml"
+    owner: root
+    group: root
+    mode: u=rw,g=rw,o=r
+  tags: copy
+
+- name: Copy logstash configuration from template
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/var/containers/logging/logstash/config/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: u=rw,g=r,o=r
+  loop:
+    - { src: 'logstash.j2', dest: 'logstash.yml' }
+    - { src: 'pipelines.j2', dest: 'pipelines.yml' }
+    - { src: 'jvm.j2', dest: 'jvm.options' }
+    - { src: 'log4j2.j2', dest: 'log4j2.properties' }
+  tags: copy
+
+- name: Copy pipeline from template
+  ansible.builtin.template:
+    src: "pipeline-logstash.j2"
+    dest: "/var/containers/logging/logstash/pipeline/logstash.config"
+    owner: root
+    group: root
+    mode: u=rw,g=r,o=r
+  tags: copy
+
+- name: Create and start logging services
+  community.docker.docker_compose_v2:
+    project_src: /var/containers/logging/logstash
+    files: docker-compose.yml
+    state: present
+    services:
+      - logstash
+  tags: start

@@ -1,0 +1,50 @@
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/docker/*.log
+    multiline:
+      pattern: '^\s'
+      negate: false
+      match: after
+    fields:
+      log_type: docker
+    fields_under_root: true
+    data_stream:
+      dataset: docker    # goes to logs-docker-testing
+
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/auth.log
+      - /var/log/syslog
+    fields:
+      log_type: system
+    fields_under_root: true
+    data_stream:
+      dataset: system  # goes to logs-system-testing
+
+# 👇 Add real host metadata
+processors:
+  - add_host_metadata:
+      netinfo.enabled: true
+      replace_fields: true
+
+output.logstash:
+  hosts:
+    - "{{ hostvars[groups['logging_cluster'][0]].ansible_facts.hostname }}.{{ dns_domain_name }}:5044"
+  ssl.enabled: false   # disable SSL/TLS
+  setup.ilm.enabled: false
+  setup.template.enabled: false
+  #data_stream:
+  #  namespace: testing
+  #  type: logs
+  ###dataset: docker  # Filebeat overrides this per input → you’ll see dataset=auth, dataset=syslog, etc.
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat
+  keepfiles: 7
+  permissions: 0640

@@ -1,0 +1,22 @@
+version: '2.2'
+
+services:
+  logstash:
+    container_name: logstash 
+    image: docker.elastic.co/logstash/logstash:{{ elk_version }}
+    mem_limit: 2g
+    ports:
+      - "5044:5044/tcp" #for filebeat
+      - "5046:5046/tcp" #for filebeat
+      - "5055:5055/tcp" #for filebeat
+      - "9600:9600/tcp" #for Logstash monitoring API
+      - "12201:12201/udp" #for gelf
+    volumes:
+      - /var/containers/logging/logstash/config/:/usr/share/logstash/config/
+      - /var/containers/logging/logstash/pipeline/:/usr/share/logstash/pipeline/
+      - {{ volume_certs }}:/usr/share/logstash/certs/
+    restart: always
+
+volumes:
+  certs:
+    driver: local

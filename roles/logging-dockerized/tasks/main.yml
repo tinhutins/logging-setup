@@ -1,4 +1,0 @@
-- name: Install logging stack
-  import_tasks: logging-stack-install.yml
-  when: inventory_hostname == groups['logging'][0]
-  tags: [ 'never', 'logging' ]

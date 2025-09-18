@@ -1,0 +1,137 @@
+---
+#nginx
+- name: Create nginx and ssl directory if it does not exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /var/containers/logging/kibana/nginx
+    - /var/containers/logging/kibana/nginx/ssl
+  when: inventory_hostname == groups['logging_cluster'][0]
+
+- name: copy nginx.conf from template
+  ansible.builtin.template:
+    src: "nginx/nginx.j2"
+    dest: "/var/containers/logging/kibana/nginx/nginx.conf"
+    owner: root
+    group: root
+    mode: u=rw,g=r,o=r
+  tags: logging_nginx_conf_changed
+  when: inventory_hostname == groups['logging_cluster'][0]
+
+- name: Copy certificates and key from the ansible-vault
+  copy:
+    content: "{{ item.content }}"
+    dest: "/var/containers/logging/kibana/nginx/ssl/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "u=rw,g=r,o="
+  loop:
+    - "{{ tino_certificate }}"
+    - "{{ tino_root_certificate }}"
+    - "{{ tino_entity_certificate }}"
+    - "{{ tino_certificate_key }}"
+  when: inventory_hostname == groups['logging_cluster'][0]
+
+- name: Register elastic CA
+  command: cat /var/containers/logging/certs/ca/ca.crt
+  register: ca_register
+  delegate_to: "{{ groups['logging_cluster'][0] }}"
+  when: inventory_hostname == groups['logging_cluster'][0]
+
+- name: Copy kibana.yml to kibana server
+  template:
+    src: kibana.j2
+    dest: /var/containers/logging/kibana/kibana.yml
+    owner: 1000
+    group: 0
+    mode: g=rwx
+  tags: kibana_config_changed
+  when: inventory_hostname == groups['logging_cluster'][0]
+
+- name: Copy kibana compose config files
+  ansible.builtin.template:
+    src: "docker-compose-kibana.j2"
+    dest: "/var/containers/logging/kibana/docker-compose.yml"
+    owner: root
+    group: root
+    mode: u=rw,g=rw,o=r
+  tags: cert
+  when: inventory_hostname == groups['logging_cluster'][0]
+
+#ostavim password ovak rucno ak to ne prode : https://www.elastic.co/guide/en/elasticsearch/reference/current/reset-password.html
+- name: Exec to elastic container and generate kibana pass
+  community.docker.docker_container_exec:
+    container: elasticsearch
+    command: >
+      /usr/bin/curl -k -s -X POST
+      --cacert /usr/share/elasticsearch/config/certificates/ca/ca.crt
+      -u elastic:{{ elastic_password }}
+      -H "Content-Type: application/json"
+      https://{{ ansible_hostname }}.{{ int_domain_name }}:9200/_security/user/kibana_system/_password
+      -d '{"password":"{{ kibana_password }}"}'
+  when: inventory_hostname == groups['logging_cluster'][0]
+
+#Running this because for some reason kibana break if the password isn't reset
+- name: Exec to elastic container and reset elastic password
+  community.docker.docker_container_exec:
+    container: elasticsearch
+    command: >
+      /usr/bin/curl -k -s -X POST
+      --cacert /usr/share/elasticsearch/config/certificates/ca/ca.crt
+      -u elastic:{{ elastic_password }}
+      -H "Content-Type: application/json"
+      https://{{ ansible_hostname }}.{{ int_domain_name }}:9200/_security/user/elastic/_password
+      -d '{"password":"{{ elastic_password }}"}'
+  when: inventory_hostname == groups['logging_cluster'][0]
+
+- name: Recreate elasticsearch container
+  community.docker.docker_compose_v2:
+    project_src: /var/containers
+    services:
+      - elasticsearch
+    state: present
+    recreate: always 
+
+- name: Wait for port 9200 to become open on the host, don't start checking for 20 seconds
+  wait_for:
+    port: 9200
+    delay: 20
+  
+- name: Create and start kibana service
+  community.docker.docker_compose_v2:
+    project_src: /var/containers/logging/kibana/
+    services: 
+      - kibana
+      - nginx
+  when: inventory_hostname == groups['logging_cluster'][0]
+
+- name: Restart kibana service after configuration change
+  community.docker.docker_compose_v2:
+    project_src: /var/containers/logging/kibana/
+    services: 
+      - kibana
+    state: restarted
+  tags: ['never', 'kibana_config_changed']
+  when: inventory_hostname == groups['logging_cluster'][0]
+
+- name: Create Kibana data view for Docker logs
+  uri:
+    url: "http://{{ ansible_hostname }}.{{ dns_domain_name }}:5601/api/data_views/data_view"
+    method: POST
+    user: "elastic"
+    password: "{{ elastic_password }}"
+    force_basic_auth: yes
+    headers:
+      kbn-xsrf: "true"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      data_view:
+        name: "logs-docker-*"
+        title: "logs-docker-*"
+        timeFieldName: "@timestamp"
+  when: inventory_hostname in groups['logging_cluster'][0]
+  delegate_to: "{{ groups['logging_cluster'][0] }}"
+  run_once: true

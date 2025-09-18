@@ -1,0 +1,26 @@
+# Default Kibana configuration for docker target
+server.host: "0.0.0.0"
+server.shutdownTimeout: "5s"
+#server.publicBaseUrl: "https://{{hostvars[groups['logging_cluster'] | sort | first]['ansible_facts']['hostname']}}.{{int_domain_name}}"
+xpack.security.session.idleTimeout: "1h"
+xpack.security.session.lifespan: "30d"
+xpack.reporting.roles.enabled: "false"
+logging.root.level: info
+xpack.fleet.outputs:
+  - name: default
+    id: fleet-default-output
+    type: elasticsearch
+    is_default: true
+    is_default_monitoring: true
+    hosts:
+      {% for server in groups['logging_cluster'] %}
+      - https://{{hostvars[server]['ansible_facts']['hostname']}}.{{int_domain_name}}:9200
+      {% endfor %}
+
+    config:
+      ssl: 
+        certificate_authorities:
+        - |
+        {% for line in ca_register.stdout.split('\n') %}
+        {{ line }}
+        {% endfor %}

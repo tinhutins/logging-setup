@@ -1,0 +1,11 @@
+---
+## Default Logstash configuration from Logstash base image.
+## https://github.com/elastic/logstash/blob/master/docker/data/logstash/config/logstash-full.yml
+#
+http.host: "0.0.0.0"
+xpack.monitoring.enabled: true
+xpack.monitoring.elasticsearch.hosts: [{% for server in groups['logging_cluster'] %}"https://{{hostvars[server]['ansible_facts']['hostname']}}.{{dns_domain_name}}:9200"{{ "," if not loop.last }}{% endfor %}]
+xpack.monitoring.elasticsearch.username: elastic
+xpack.monitoring.elasticsearch.password: {{elastic_password}}
+xpack.monitoring.elasticsearch.ssl.certificate_authority: /usr/share/logstash/certs/ca/ca.crt
+#log.level: debug

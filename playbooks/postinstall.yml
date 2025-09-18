@@ -1,0 +1,21 @@
+---
+# Installs logging cluster outside K8s, controlled with tags:
+  # add_elasticsearch
+  # add_kibana
+  # add_fleet
+  # kibana_config_changed
+- name: Installing logging cluster
+  hosts: logging_cluster
+  gather_facts: true
+  roles:
+    - { role: roles/logging_cluster }
+  become: yes
+  become_user: root
+
+- name: Installing logging single node 
+  hosts: logging_single_node
+  gather_facts: true
+  roles:
+    - { role: roles/logging_single_node }
+  become: yes
+  become_user: root

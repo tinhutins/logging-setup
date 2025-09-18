@@ -1,0 +1,85 @@
+input {
+  beats {
+    port => 5044
+
+  }
+
+}
+
+filter {
+  # Remove unnecessary Docker labels
+  mutate {
+    remove_field => [
+      "[docker][container][labels][io][rancher][container][uuid]",
+      "[docker][container][labels][io][rancher][environment][uuid]",
+      "[docker][container][labels][io][rancher][service][deployment][unit]",
+      "[docker][container][labels][io][rancher][service][hash]",
+      "[docker][container][labels][io][rancher][service][launch][config]"
+    ]
+  }
+
+  mutate {
+    add_field => { "ingest_node" => "%{[host][name]}" }
+  }
+
+  # Drop unwanted logs
+  if [kubernetes][namespace] == "logging" {
+    drop {}
+  }
+
+  if [kubernetes][deployment][name] == "cluster-autoscaler" {
+    drop {}
+  }
+
+  if [message] == 'The transaction "GET /" is not registered.' {
+    drop {}
+  }
+
+  # Add ingest node info
+  mutate {
+    add_field => { "ingest_node" => "%{host}" }
+  }
+
+  # Parse JSON messages
+  json {
+    source => "message"
+    skip_on_invalid_json => true
+  }
+}
+
+output {
+  # Route by log_type field from filebeat
+  if [log_type] == "docker" {
+    elasticsearch {
+      hosts => [
+        {% for server in groups['logging_cluster'] %}
+          "https://{{ hostvars[server]['ansible_facts']['hostname'] }}.{{ dns_domain_name }}:9200"{{ "," if not loop.last }}
+        {% endfor %}
+      ]
+      user => "elastic"
+      password => {{ elastic_password }}
+      ssl => true
+      ssl_certificate_authorities => "/usr/share/logstash/certs/ca/ca.crt"
+      data_stream => true
+      data_stream_type => "logs"
+      data_stream_dataset => "docker"
+      data_stream_namespace => "testing"
+    }
+  } else if [log_type] == "system" {
+    elasticsearch {
+      hosts => [
+        {% for server in groups['logging_cluster'] %}
+          "https://{{ hostvars[server]['ansible_facts']['hostname'] }}.{{ dns_domain_name }}:9200"{{ "," if not loop.last }}
+        {% endfor %}
+      ]
+      user => "elastic"
+      password => {{ elastic_password }}
+      ssl => true
+      ssl_certificate_authorities => "/usr/share/logstash/certs/ca/ca.crt"
+      data_stream => true
+      data_stream_type => "logs"
+      data_stream_dataset => "system"
+      data_stream_namespace => "testing"
+    }
+  }
+}
