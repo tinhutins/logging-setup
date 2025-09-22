@@ -19,7 +19,64 @@ filter {
   }
 
   mutate {
-    add_field => { "ingest_node" => "%{[host][name]}" }
+    replace => { "ingest_node" => "%{[host][hostname]}" }
+  }
+
+  mutate {
+   replace => { "ingest_node" => "%{syslog_host}" }
+  }
+  
+  # --- Grok parsing for various log formats ---
+  grok {
+  match => {
+    "message" => [
+      # Standard syslog prefix + optional JSON payload
+      "%{TIMESTAMP_ISO8601:syslog_timestamp} %{HOSTNAME:syslog_host} %{DATA:syslog_program}\[%{NUMBER:syslog_pid}\]: %{GREEDYDATA:json_payload}",
+
+      # Logstash internal logs with bracketed metadata
+      "%{TIMESTAMP_ISO8601:syslog_timestamp} %{HOSTNAME:syslog_host} %{DATA:syslog_program}\[%{NUMBER:syslog_pid}\]: \[%{TIMESTAMP_ISO8601:logstash_ts}\]\[%{LOGLEVEL:log_level}\] \[%{DATA:logger}\] %{GREEDYDATA:log_message}",
+
+      # Nginx / Apache access logs (common web logs)
+      "%{TIMESTAMP_ISO8601:syslog_timestamp} %{HOSTNAME:syslog_host} %{DATA:syslog_program}\[%{NUMBER:syslog_pid}\]: %{IPORHOST:client_ip} %{DATA:ident} %{DATA:auth} \[%{HTTPDATE:access_time}\] \"%{WORD:verb} %{DATA:request} HTTP/%{NUMBER:http_version}\" %{NUMBER:response_code} %{NUMBER:bytes} \"%{URI:referrer}\" \"%{DATA:user_agent}\" - %{DATA:server_host}",
+
+      # Elasticsearch / Kibana JSON logs embedded in syslog
+      "%{TIMESTAMP_ISO8601:syslog_timestamp} %{HOSTNAME:syslog_host} %{DATA:syslog_program}\[%{NUMBER:syslog_pid}\]: %{GREEDYDATA:json_payload}",
+
+      # Docker container logs: only program and message
+      "%{TIMESTAMP_ISO8601:syslog_timestamp} %{HOSTNAME:syslog_host} %{DATA:syslog_program}\[%{NUMBER:syslog_pid}\]: %{GREEDYDATA:docker_message}",
+
+      # Syslog with bracketed process info and colon separator
+      "%{TIMESTAMP_ISO8601:syslog_timestamp} %{HOSTNAME:syslog_host} %{DATA:syslog_program}\[%{NUMBER:syslog_pid}\]: \[%{DATA:process_thread}\] %{GREEDYDATA:log_message}",
+
+      # Syslog lines with error / exception messages including URLs
+      "%{TIMESTAMP_ISO8601:syslog_timestamp} %{HOSTNAME:syslog_host} %{DATA:syslog_program}\[%{NUMBER:syslog_pid}\]: %{GREEDYDATA:log_message} {:url=>\"%{URI:url}\", :exception=>%{DATA:exception}, :message=>\"%{GREEDYDATA:error_message}\"}",
+
+      # Nginx access logs with IPv6
+      "%{TIMESTAMP_ISO8601:syslog_timestamp} %{HOSTNAME:syslog_host} %{DATA:syslog_program}\[%{NUMBER:syslog_pid}\]: %{IPV6:client_ip} %{DATA:ident} %{DATA:auth} \[%{HTTPDATE:access_time}\] \"%{WORD:verb} %{DATA:request} HTTP/%{NUMBER:http_version}\" %{NUMBER:response_code} %{NUMBER:bytes} \"%{URI:referrer}\" \"%{DATA:user_agent}\" - %{DATA:server_host}"
+    ]
+  }
+  tag_on_failure => ["_grokparsefailure"]
+}
+
+
+  # --- Parse JSON payload if exists ---
+  if [json_payload] {
+    json {
+      source => "json_payload"
+      target => "elasticsearch_log"
+      skip_on_invalid_json => true
+    }
+  }
+
+  #  Drop all monitoring fields after JSON is expanded
+  mutate {
+    remove_field => [ "[elasticsearch_log][monitoring]" ]
+  }
+
+   # --- Clean up raw fields ---
+  mutate {
+    remove_field => ["json_payload", "tags"]
+    replace => { "ingest_node" => "%{syslog_host}" }
   }
 
   # Drop unwanted logs
@@ -35,16 +92,6 @@ filter {
     drop {}
   }
 
-  # Add ingest node info
-  mutate {
-    add_field => { "ingest_node" => "%{host}" }
-  }
-
-  # Parse JSON messages
-  json {
-    source => "message"
-    skip_on_invalid_json => true
-  }
 }
 
 output {
