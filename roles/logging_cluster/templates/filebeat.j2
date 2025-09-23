@@ -1,4 +1,33 @@
 filebeat.inputs:
+{% if elk_version is version('9.0', '>=') %}
+  - type: filestream
+    id: docker-logs
+    enabled: true
+    paths:
+      - /var/log/docker/*.log
+    parsers:
+      - multiline:
+          pattern: '^\s'
+          negate: false
+          match: after
+    fields:
+      log_type: docker
+    fields_under_root: true
+    data_stream:
+      dataset: docker
+
+  - type: filestream
+    id: system-logs
+    enabled: true
+    paths:
+      - /var/log/auth.log
+      - /var/log/syslog
+    fields:
+      log_type: system
+    fields_under_root: true
+    data_stream:
+      dataset: system
+{% else %}
   - type: log
     enabled: true
     paths:
@@ -11,7 +40,7 @@ filebeat.inputs:
       log_type: docker
     fields_under_root: true
     data_stream:
-      dataset: docker    # goes to logs-docker-testing
+      dataset: docker
 
   - type: log
     enabled: true
@@ -22,9 +51,9 @@ filebeat.inputs:
       log_type: system
     fields_under_root: true
     data_stream:
-      dataset: system  # goes to logs-system-testing
+      dataset: system
+{% endif %}
 
-# 👇 Add real host metadata
 processors:
   - add_host_metadata:
       netinfo.enabled: true

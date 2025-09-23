@@ -105,7 +105,11 @@ output {
       ]
       user => "elastic"
       password => {{ elastic_password }}
+      {% if elk_version is version('9.0', '>=') %}
+      ssl_enabled => true
+      {% else %}
       ssl => true
+      {% endif %}
       ssl_certificate_authorities => "/usr/share/logstash/certs/ca/ca.crt"
       data_stream => true
       data_stream_type => "logs"
@@ -121,7 +125,11 @@ output {
       ]
       user => "elastic"
       password => {{ elastic_password }}
+      {% if elk_version is version('9.0', '>=') %}
+      ssl_enabled => true
+      {% else %}
       ssl => true
+      {% endif %}
       ssl_certificate_authorities => "/usr/share/logstash/certs/ca/ca.crt"
       data_stream => true
       data_stream_type => "logs"

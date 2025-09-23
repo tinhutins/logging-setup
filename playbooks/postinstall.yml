@@ -9,13 +9,13 @@
   gather_facts: true
   roles:
     - { role: roles/logging_cluster }
+  remote_user: root
   become: yes
-  become_user: root
 
 - name: Installing logging single node 
   hosts: logging_single_node
   gather_facts: true
   roles:
     - { role: roles/logging_single_node }
+  remote_user: root
   become: yes
-  become_user: root

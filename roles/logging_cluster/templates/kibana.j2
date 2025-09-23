@@ -6,6 +6,11 @@ xpack.security.session.idleTimeout: "1h"
 xpack.security.session.lifespan: "30d"
 xpack.reporting.roles.enabled: "false"
 logging.root.level: info
+
+{% if elk_version is version('9.0', '>=') %}
+# Required for alerts & monitoring in Kibana 9+
+xpack.encryptedSavedObjects.encryptionKey: "{{ xpack_security_encryptionkey }}"
+{% endif %}
 xpack.fleet.outputs:
   - name: default
     id: fleet-default-output
