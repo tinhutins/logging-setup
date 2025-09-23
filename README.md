@@ -47,30 +47,30 @@ Default vault password:
 
 1. Add Elasticsearch nodes:
 
-  ``bash
+  ```bash
   ansible-playbook -i inventory.ini playbooks/postinstall.yml --tags add_elasticsearch --ask-vault-pass -kK
   ```
 
 2. Add Kibana:
 
-  ``bash
+  ```bash
   ansible-playbook -i inventory.ini playbooks/postinstall.yml --tags add_kibana --ask-vault-pass -kK
   ```
 
 3. Add Logstash:
 
-  ``bash
+  ```bash
   ansible-playbook -i inventory.ini playbooks/postinstall.yml --tags add_logstash --ask-vault-pass -kK
   ```
 
 4. Add filebeat:
 
-  ``bash
+  ```bash
   ansible-playbook -i inventory.ini playbooks/postinstall.yml --tags add_filebeat --ask-vault-pass -kK
   ```
 
 5. Add fleet:
 
-  ``bash
+  ```bash
   ansible-playbook -i inventory.ini playbooks/postinstall.yml --tags add_fleet --ask-vault-pass -kK
   ```
