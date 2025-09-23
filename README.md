@@ -63,13 +63,13 @@ Default vault password:
   ansible-playbook -i inventory.ini playbooks/postinstall.yml --tags add_logstash --ask-vault-pass -kK
   ```
 
-4. Add filebeat:
+4. Add Filebeat:
 
   ```bash
   ansible-playbook -i inventory.ini playbooks/postinstall.yml --tags add_filebeat --ask-vault-pass -kK
   ```
 
-5. Add fleet:
+5. Add Fleet:
 
   ```bash
   ansible-playbook -i inventory.ini playbooks/postinstall.yml --tags add_fleet --ask-vault-pass -kK
