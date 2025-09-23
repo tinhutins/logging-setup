@@ -421,6 +421,7 @@
           number_of_shards: 1       # adjust as needed
           number_of_replicas: 1     # add replicas here
           index.lifecycle.name: "logs-docker-ilm"
+          index.lifecycle.rollover_alias: "logs-docker-testing"  # without this rollover will not work
     status_code: [200, 201]
   when: inventory_hostname in groups['logging_cluster'][0]
 
@@ -476,6 +477,7 @@
           number_of_shards: 1
           number_of_replicas: 1
           index.lifecycle.name: "logs-system-ilm"
+          index.lifecycle.rollover_alias: "logs-system-testing" # without this rollover will not work
     status_code: [200, 201]
   when: inventory_hostname == groups['logging_cluster'][0]
 
