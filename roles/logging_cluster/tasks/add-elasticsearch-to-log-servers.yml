@@ -372,10 +372,11 @@
           hot:
             actions:
               rollover:
-                max_size: "1gb"
+                max_primary_shard_size: "30mb" # use this for ES 8.6 and later
+                max_size: "30mb" # this will be deprecated in future
                 max_age: "1d"
           delete:
-            min_age: "5d"
+            min_age: "2d"
             actions:
               delete: {}
     status_code: [200, 201]
@@ -415,7 +416,7 @@
       index_patterns: ["logs-docker-*"]
       data_stream: {}
       priority: 500
-      composed_of: ["logs-docker-mappings"]
+      composed_of: ["logs-common-mappings"]
       template:
         settings:
           number_of_shards: 1       # adjust as needed
@@ -450,10 +451,10 @@
           hot:
             actions:
               rollover:
-                max_size: "2gb"
-                max_age: "7d"
+                max_primary_shard_size: "100mb" # use this for ES 8.6 and later
+                max_size: "100mb" # this will be deprecated in future
           delete:
-            min_age: "14d"
+            min_age: "2d"
             actions:
               delete: {}
     status_code: [200, 201]

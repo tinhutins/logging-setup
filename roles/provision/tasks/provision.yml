@@ -72,24 +72,24 @@
       export HISTFILESIZE=30000
       export HISTCONTROL=ignoredups
 
-# # Debian Family upgrade
-# - name: Update all packages to their latest version
-#   apt:
-#     name: "*"
-#     state: latest
-#   when: ansible_os_family == "Debian"
+# Debian Family upgrade
+- name: Update all packages to their latest version
+  apt:
+    name: "*"
+    state: latest
+  when: ansible_os_family == "Debian"
 
-# # Install additional packages
-# - name: Install packages
-#   package:
-#     name: "{{ packages }}"
-#     state: present
+# Install additional packages
+- name: Install packages
+  package:
+    name: "{{ packages }}"
+    state: present
 
-# # Does a distro upgrade
-# - name: Upgrade the OS (apt-get dist-upgrade)
-#   apt:
-#     upgrade: dist
-#   when: ansible_os_family == "Debian"
+# Does a distro upgrade
+- name: Upgrade the OS (apt-get dist-upgrade)
+  apt:
+    upgrade: dist
+  when: ansible_os_family == "Debian"
 
 # Reboot after upgrade
 - name: Reboot host
